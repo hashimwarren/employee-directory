@@ -1,4 +1,6 @@
 import "dotenv/config";
+import {del} from "@vercel/blob";
+const createdPhotos:string[]=[];
 import assert from "node:assert/strict";
 import { eq, like, sql } from "drizzle-orm";
 import { db, pool } from "../db";
@@ -61,7 +63,7 @@ async function main() {
         directors: sql<number>`count(*) filter (where level='Director')::int`,
         managers: sql<number>`count(*) filter (where level='Manager')::int`,
         ics: sql<number>`count(*) filter (where level='IC')::int`,
-        images: sql<number>`count(*) filter (where image <> '')::int`,
+        images: sql<number>`count(*) filter (where image like 'https://%.public.blob.vercel-storage.com/employee-portraits/%')::int`,
       })
       .from(employees)
       .where(eq(employees.isDemo, true));
@@ -120,7 +122,7 @@ async function main() {
       title: "Software Engineer",
       team: "Engineering",
       level: "IC",
-      image: "",
+      image: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nX8AAAAASUVORK5CYII=",
       managerId: "demo-002",
       ownerId: b.data.user.id,
     };
@@ -139,6 +141,9 @@ async function main() {
     const create = await POST(request("POST", input, a.cookie));
     check(create.status === 201, "Employee creates their own profile");
     const profile = await create.json();
+    check(typeof profile.image==='string'&&profile.image.includes('.public.blob.vercel-storage.com/employee-portraits/uploads/'),'Uploaded photo is stored in Vercel Blob, with only its URL in Neon');
+    createdPhotos.push(profile.image);
+    input.image=profile.image;
     check(
       profile.ownerId === a.data.user.id,
       "Client cannot spoof profile ownership",
@@ -236,6 +241,7 @@ async function main() {
         {
           ...input,
           name: "Verification child",
+          image: "",
           email: `${tag}child@example.com`,
           managerId: profile.id,
           ownerId: null,
@@ -281,6 +287,7 @@ async function main() {
     await db.delete(employees).where(like(employees.email, `${tag}%`));
     await db.delete(user).where(like(user.username, `${tag}%`));
     await pool.end();
+    if(createdPhotos.length)await del(createdPhotos);
   }
 }
 main().catch((e) => {
